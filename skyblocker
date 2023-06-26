@@ -1,0 +1,160 @@
+// https://discord.gg/udJkAzPZwP 
+// Join for more amazing macros ALL OPEN SOURCED
+
+package com.example.gemstonemod;
+
+import net.fabricmc.api.ClientModInitializer;
+import net.minecraft.block.Blocks;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Vec3d;
+import org.lwjgl.glfw.GLFW;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class GemstoneMod implements ClientModInitializer {
+    private static boolean isMiningEnabled = false;
+    private static boolean isInCrystalHollows = false;
+    private static List<BlockPos> gemstonePatches = new ArrayList<>();
+    private static float prevYaw = Float.NaN;
+    private static float prevPitch = Float.NaN;
+    private static int currentPatchIndex = 0;
+
+    @Override
+    public void onInitializeClient() {
+        MinecraftClient.getInstance().execute(() -> {
+            isInCrystalHollows = checkIfInCrystalHollows();
+
+            if (isInCrystalHollows) {
+                enableMining();
+            } else {
+                disableMining();
+            }
+        });
+    }
+
+    private boolean checkIfInCrystalHollows() {
+        List<String> tablist = getTablist();
+        for (String entry : tablist) {
+            if (entry.equalsIgnoreCase("Crystal") || entry.equalsIgnoreCase("Crystal Hollows")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> getTablist() {
+        try {
+            List<String> result = new ArrayList<>();
+            MinecraftClient client = MinecraftClient.getInstance();
+            for (String playerName : client.getNetworkHandler().getPlayerListEntries()) {
+                if (!playerName.isEmpty()) {
+                    result.add(playerName);
+                }
+            }
+            return result;
+        } catch (NullPointerException e) {
+            return new ArrayList<>();
+        }
+    }
+
+    private void enableMining() {
+        isMiningEnabled = true;
+        MinecraftClient.getInstance().execute(() -> {
+            gemstonePatches = findStainedGlassPatches(MinecraftClient.getInstance());
+            if (!gemstonePatches.isEmpty()) {
+                currentPatchIndex = 0;
+                mineGemstone();
+            } else {
+                disableMining();
+            }
+        });
+    }
+
+    private void disableMining() {
+        isMiningEnabled = false;
+        gemstonePatches.clear();
+        currentPatchIndex = 0;
+    }
+
+    private void mineGemstone() {
+        MinecraftClient client = MinecraftClient.getInstance();
+        Vec3d playerPos = client.player.getPos();
+        Vec3d targetPos = new Vec3d(gemstonePatches.get(currentPatchIndex).getX() + 0.5, gemstonePatches.get(currentPatchIndex).getY() + 0.5, gemstonePatches.get(currentPatchIndex).getZ() + 0.5);
+
+        double distance = playerPos.distanceTo(targetPos);
+        if (distance <= 4.5) {
+            if (client.player.getMainHandStack().isEmpty()) {
+                InputUtil.Key mouseButton = InputUtil.Type.MOUSE.getOrCreate(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                client.options.keyAttack.setPressed(true);
+                client.options.keyAttack.setReleased(true);
+                InputUtil.setKeyCodeState(mouseButton, true);
+            } else {
+                if (client.world.getBlockState(gemstonePatches.get(currentPatchIndex)).isAir()) {
+                    currentPatchIndex++;
+                    if (currentPatchIndex >= gemstonePatches.size()) {
+                        InputUtil.Key mouseButton = InputUtil.Type.MOUSE.getOrCreate(GLFW.GLFW_MOUSE_BUTTON_LEFT);
+                        client.options.keyAttack.setPressed(false);
+                        InputUtil.setKeyCodeState(mouseButton, false);
+                        disableMining();
+                        return;
+                    }
+                    targetPos = new Vec3d(gemstonePatches.get(currentPatchIndex).getX() + 0.5, gemstonePatches.get(currentPatchIndex).getY() + 0.5, gemstonePatches.get(currentPatchIndex).getZ() + 0.5);
+                }
+            }
+        }
+
+        Vec3d motion = targetPos.subtract(playerPos).normalize();
+        float yaw = (float) Math.toDegrees(Math.atan2(-motion.x, motion.z));
+        float pitch = (float) Math.toDegrees(Math.atan2(motion.y, Math.sqrt(motion.x * motion.x + motion.z * motion.z)));
+        if (!Float.isNaN(prevYaw) && !Float.isNaN(prevPitch)) {
+            float deltaYaw = yaw - prevYaw;
+            float deltaPitch = pitch - prevPitch;
+            client.player.yaw += deltaYaw;
+            client.player.pitch += deltaPitch;
+        }
+        prevYaw = yaw;
+        prevPitch = pitch;
+
+        double speed = 0.1;
+        motion = motion.multiply(speed);
+        client.player.setVelocity(motion.x, motion.y, motion.z);
+    }
+
+    private List<BlockPos> findStainedGlassPatches(MinecraftClient client) {
+        List<BlockPos> patches = new ArrayList<>();
+        Vec3d playerPos = client.player.getPos();
+        int maxDistance = 16;
+
+        for (int distance = 1; distance <= maxDistance; distance++) {
+            for (int x = -distance; x <= distance; x++) {
+                for (int y = -distance; y <= distance; y++) {
+                    for (int z = -distance; z <= distance; z++) {
+                        BlockPos searchPos = new BlockPos(playerPos.getX() + x, playerPos.getY() + y, playerPos.getZ() + z);
+                        if (client.world.getBlockState(searchPos).getBlock() == Blocks.STAINED_GLASS) {
+                            patches.add(searchPos);
+                        }
+                    }
+                }
+            }
+        }
+
+        return patches;
+    }
+
+    public static void toggleMining() {
+        if (isMiningEnabled) {
+            disableMining();
+        } else {
+            MinecraftClient.getInstance().execute(() -> {
+                gemstonePatches = findStainedGlassPatches(MinecraftClient.getInstance());
+                if (!gemstonePatches.isEmpty()) {
+                    currentPatchIndex = 0;
+                    enableMining();
+                }
+            });
+        }
+    }
+}
